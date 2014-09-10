@@ -99,7 +99,8 @@ def upload_jobtainer(directory, client, dryrun=False):
 
 class ZMapReduce(object):
 
-    def __init__(self, jobtainer, inputs=None, per_job=160, **client):
+    def __init__(self, jobtainer, inputs=None, per_job=160,
+                 client=None, **client_kwargs):
 
         # properties
         self._job_spec = None
@@ -108,8 +109,23 @@ class ZMapReduce(object):
         self.results = None
         self.per_job = per_job
 
-        self._client_kwargs = client
-        self.client = get_client(**client)
+        if not client:
+            self._client_kwargs = client_kwargs
+            self.client = get_client(**client_kwargs)
+        else:
+            if not isinstance(client, swiftclient.Connection):
+                raise ValueError("'client' should be a "
+                                 "swiftclient.Connection instance")
+            else:
+                self.client = client
+                # these attributes are set in order to create "new"
+                # swiftclient connections when multithreading
+                self.client.url, self.client.token = self.client.get_auth()
+                self._client_kwargs = {
+                    'auth': self.client.authurl,
+                    'user': self.client.user,
+                    'key': self.client.key,
+                }
 
         all_containers = self.list_containers(select='name')
         if jobtainer not in all_containers:
