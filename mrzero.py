@@ -19,6 +19,7 @@ Goals:
 """
 import copy
 import itertools
+import logging
 import math
 try:
     import simplejson as json
@@ -33,6 +34,8 @@ import urlparse
 from multiprocessing import pool
 
 import six
+
+LOG = logging.getLogger(__name__)
 
 CACHE = {}
 PER_JOB = 10
@@ -59,6 +62,41 @@ def cached(original_func):
     new_func.__doc__ = original_func.__doc__
     return new_func
 
+def normalized_path(path, must_exist=True):
+    """Normalize and expand a shorthand or relative path.
+
+    If the value is Falsy, a non-string, or invalid, raise ValueError.
+    """
+    if not path or not isinstance(path, basestring):
+        raise ValueError("The directory or path should be a string.")
+    norm = os.path.normpath(path)
+    norm = os.path.abspath(os.path.expanduser(norm))
+    if must_exist:
+        if not os.path.exists(norm):
+            raise ValueError("%s is not a valid path." % norm)
+    return norm
+
+def upload_jobtainer(directory, client, dryrun=False):
+    """Upload scripts in specified dir to jobtainer of the same name.
+
+    Local directory specified should contain 2 files: mapper.py, reducer.py
+    """
+    normdir = normalized_path(directory)
+    jobtainer_name = os.path.split(normdir)[1]
+    for fname in ('mapper.py', 'reducer.py'):
+        filepath = os.path.join(normdir, fname)
+        if not os.path.exists(filepath):
+            msg = ('%s not found in %s. A jobtainer should contain a '
+                   'mapper.py and a reducer.py' % (fname, directory))
+            raise IOError(msg)
+        else:
+            if dryrun:
+                LOG.debug("Dry-run. Would otherwise upload %s.",
+                          filepath)
+                continue
+            client.put_container(jobtainer_name)
+            with open(filepath, 'r') as script:
+                client.put_object(jobtainer_name, fname, script.read())
 
 class ZMapReduce(object):
 
