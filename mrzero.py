@@ -26,14 +26,13 @@ try:
 except ImportError:
     import json
 import os
-import swiftclient
 import sys
 import threading
 import urlparse
 
 from multiprocessing import pool
 
-import six
+import swiftclient
 
 LOG = logging.getLogger(__name__)
 
@@ -130,7 +129,7 @@ class ZMapReduce(object):
             if isinstance(inputs, list):
                 for substr in inputs:
                     input_containers += self.get_input_containers(prefix=substr)
-            elif isinstance(inputs, six.string_types):
+            elif isinstance(inputs, basestring):
                 input_containers += self.get_input_containers(prefix=inputs)
             else:
                 raise ValueError("'inputs' is a str or list of strings "
