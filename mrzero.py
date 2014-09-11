@@ -1,3 +1,5 @@
+#import eventlet
+#eventlet.monkey_patch()
 """
 Goals:
 
@@ -21,6 +23,7 @@ import copy
 import itertools
 import logging
 import math
+import time
 try:
     import simplejson as json
 except ImportError:
@@ -30,14 +33,15 @@ import sys
 import threading
 import urlparse
 
-from multiprocessing import pool
-
+import concurrent.futures
 import swiftclient
 
 LOG = logging.getLogger(__name__)
+CPU_COUNT = concurrent.futures.process.multiprocessing.cpu_count()
 
 CACHE = {}
-PER_JOB = 10
+PER_JOB = 120
+CONCURRENT_JOBS = 10
 
 # paths
 SW = "swift://./"
@@ -99,7 +103,7 @@ def upload_jobtainer(directory, client, dryrun=False):
 
 class ZMapReduce(object):
 
-    def __init__(self, jobtainer, inputs=None, per_job=160,
+    def __init__(self, jobtainer, inputs=None, per_job=PER_JOB,
                  client=None, **client_kwargs):
 
         # properties
@@ -252,43 +256,36 @@ class ZMapReduce(object):
 
         return self.final_result['value']
 
-    def cleanup(self):
+    def cleanup(self, timeout=45):
         """Cleanup errors/results for job.
 
         Try to do this asynchronously.
         """
+        def should_cleanup(name):
+            """Determine whether the object should be deleted."""
+            sw = lambda substr: name.startswith(substr)
+            ew = lambda substr: name.endswith(substr)
+            return any((sw('errors'), sw('results'), ew('.err'), ew('.pyc')))
 
-        deleteasync = lambda x: threading.Thread(
-            target=self.client.delete_object, args=(self.jobtainer, x))
-        tasks = []
-        for r in self.list_objects(self.jobtainer, select='name'):
-            if r.startswith('errors'):
-                t = deleteasync(r)
-                t.start()
-                tasks.append(t)
-            elif r.startswith('results'):
-                t = deleteasync(r)
-                t.start()
-                tasks.append(t)
-            elif r.endswith(".err"):
-                t = deleteasync(r)
-                t.start()
-                tasks.append(t)
-            elif r.endswith(".pyc"):
-                t = deleteasync(r)
-                t.start()
-                tasks.append(t)
-        objects_to_remove = len(tasks)
-        while tasks:
-            i = 1
-            for task in tasks:
-                task.join()
-                sys.stdout.write('.')
-                sys.stdout.flush()
-                tasks.remove(task)
-        if objects_to_remove:
-            print ("\nFinished cleaning up [%s object(s)] "
-                   "from previous run." % (objects_to_remove))
+        with concurrent.futures.ThreadPoolExecutor(CPU_COUNT*128) as cleanup_pool:
+            futures = []
+            for r in self.list_objects(self.jobtainer, select='name'):
+                if should_cleanup(r):
+                    futures.append(
+                        cleanup_pool.submit(self.client.delete_object,
+                                            self.jobtainer, r))
+                    time.sleep()
+            if futures:
+                score = concurrent.futures.wait(futures, timeout=timeout)
+                if score.done and not score.not_done:
+                    print ("\nFinished cleaning up [%s object(s)] "
+                           "from previous run." % len(score.done))
+                else:
+                    print ("Timed out after %ss: Cleaned up [%s object(s)] "
+                           "and left behind some ( ~%s )"
+                           % (timeout, len(score.done), len(score.not_done)))
+            else:
+                print "Nothing to clean up."
 
     def mapreduce_manifest(self, job_num, objects):
 
@@ -448,11 +445,13 @@ def execute(*manifests, **clientkwargs):
 
     Return http (requests) response object(s).
     """
-    #result = map(_execute, manifests)
-    #return result
-    ppool = pool.ThreadPool()
-    result = ppool.map(_execute, manifests)
-    return result
+    with concurrent.futures.ThreadPoolExecutor(CONCURRENT_JOBS) as tpool:
+        results = []
+        for result in tpool.map(_execute, manifests, timeout=60*len(manifests)):
+            #print "Finished a job: %s" % result
+            results.append(result)
+            time.sleep()
+    return results
 
 @cached
 def calculate_job_spec(total_objects, per_job):
