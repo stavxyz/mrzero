@@ -41,7 +41,7 @@ LOG = logging.getLogger(__name__)
 CPU_COUNT = concurrent.futures.process.multiprocessing.cpu_count()
 
 CACHE = {}
-PER_JOB = 120
+PER_JOB = 90
 CONCURRENT_JOBS = 10
 
 # paths
@@ -98,7 +98,10 @@ def upload_jobtainer(directory, client, dryrun=False):
                 LOG.debug("Dry-run. Would otherwise upload %s.",
                           filepath)
                 continue
-            client.put_container(jobtainer_name)
+            try:
+                client.get_container(jobtainer_name)
+            except swiftclient.ClientException:
+                client.put_container(jobtainer_name)
             with open(filepath, 'r') as script:
                 client.put_object(jobtainer_name, fname, script.read())
 
@@ -209,7 +212,7 @@ class ZMapReduce(object):
         # of the tiers, their manifests, and results,
         # which could be easily referenced in the following loop
 
-        self.manifests = {n + 1: []
+        self.manifests = {str(n + 1): []
                           for n in xrange(self.job_spec['total_tiers'])}
 
         rresults = self.all_the_objects
@@ -227,7 +230,7 @@ class ZMapReduce(object):
             rresults = [d['path'] for g in execution_group
                         for n in g if n['name'] == 'reducer'
                         for d in n['devices'] if d['name'] == 'stdout']
-            assert len(execution_group) == self.job_spec['reduces'][tier]
+            assert len(execution_group) == self.job_spec['reduces'][int(tier)]
 
         assert len(rresults) == 1
         frpath = urlparse.urlparse(rresults[0]).path
@@ -372,16 +375,16 @@ class ZMapReduce(object):
         return containers
 
 
-def make_json(manifest):
+def make_json(thing):
     """Return a json-encoded string from a file, path, or dict."""
-    if isinstance(manifest, file):
-        manifest = manifest.read()
-    elif isinstance(manifest, (list, dict)):
-        manifest = json.dumps(manifest)
-    elif os.path.exists(manifest):
-        with open(manifest, 'r') as man:
-            manifest = man.read()
-    return manifest
+    if isinstance(thing, file):
+        thing = thing.read()
+    elif isinstance(thing, (list, dict)):
+        thing = json.dumps(thing)
+    elif os.path.exists(thing):
+        with open(thing, 'r') as fthing:
+            thing = fthing.read()
+    return thing
 
 
 @cached
@@ -463,9 +466,10 @@ def execute(*manifests, **clientkwargs):
 
     Return http (requests) response object(s).
     """
+    partial = lambda job: _execute(job, **clientkwargs)
     with concurrent.futures.ThreadPoolExecutor(CONCURRENT_JOBS) as tpool:
         results = []
-        for result in tpool.map(_execute, manifests, timeout=60*len(manifests)):
+        for result in tpool.map(partial, manifests, timeout=60*len(manifests)):
             #print "Finished a job: %s" % result
             results.append(result)
             time.sleep()
