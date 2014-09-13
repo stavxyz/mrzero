@@ -34,6 +34,7 @@ import threading
 import urlparse
 
 import concurrent.futures
+import requests
 import swiftclient
 
 LOG = logging.getLogger(__name__)
@@ -121,10 +122,9 @@ class ZMapReduce(object):
                 raise ValueError("'client' should be a "
                                  "swiftclient.Connection instance")
             else:
-                self.client = client
+                self.client = setup_client(client)
                 # these attributes are set in order to create "new"
                 # swiftclient connections when multithreading
-                self.client.url, self.client.token = self.client.get_auth()
                 self._client_kwargs = {
                     'auth': self.client.authurl,
                     'user': self.client.user,
@@ -394,10 +394,28 @@ def get_client(auth=None, user=None, key=None, **kwargs):
         eauth, euser, ekey = map(os.getenv, ('ST_AUTH', 'ST_USER', 'ST_KEY'))
         auth, user, key = auth or eauth, user or euser, key or ekey
 
+    if not all((auth, user, key)):
+        raise AttributeError(
+            "Swiftclient.Connection requires 'auth', 'user', 'key'.")
     # ZeroCloudConnection inherts from swiftclient.Connection
     # includes many kwarg/params... may be worth looking into
     client = swiftclient.Connection(auth, user, key, **kwargs)
+    return setup_client(client)
+
+def setup_client(client):
+    """Set a bigger connection pool and other attributes.
+
+    https://bugs.launchpad.net/python-swiftclient/+bug/1295812
+    """
     client.url, client.token = client.get_auth()
+
+    # prevent Connection pool is full, discarding connection: zebra.zerovm.org !
+    parsed_url, http_conn = client.http_connection()
+    adapter = requests.adapters.HTTPAdapter(pool_maxsize=1000,
+                                            pool_block=False)
+    http_conn.request_session.mount(parsed_url.scheme + "://", adapter)
+    client.http_conn = parsed_url, http_conn
+
     return client
 
 
