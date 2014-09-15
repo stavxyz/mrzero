@@ -7,8 +7,9 @@ orchestrating MapReduce jobs for http://www.zerovm.org/zebra.html
 http://docs.zerovm.org/zebra/access.html#access
 
 ### install
-pip install https://github.com/samstav/mrzero/archive/master.zip
+pip install https://github.com/samstav/mrzero/archive/master.zip  
+
+---------------
 
 TODO:
-
-- [] Add example job (print & count ? )
+- [ ] Add example job (print & count ? )
