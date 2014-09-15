@@ -53,7 +53,7 @@ REDUCER = "%s{jobtainer}/reducer.py" % SW
 
 
 def cached(original_func):
-    """Cache return values."""
+    """Memoize plz."""
     ih = lambda o: getattr(o, '__hash__', None)
     def new_func(*args, **kw):
         blob = (original_func.__class__.__name__, original_func.__name__)
@@ -187,7 +187,7 @@ class ZMapReduce(object):
             map(lambda x: all_the_objects.append(x), each)
         return all_the_objects
 
-    def run_jobs(self):
+    def __call__(self):
         if not self.manifests:
             self.generate_manifests()
 
@@ -206,11 +206,6 @@ class ZMapReduce(object):
         return self.results
 
     def generate_manifests(self):
-
-        # would probably be reasonable to define a mutable
-        # ... an instance attribute which kept track
-        # of the tiers, their manifests, and results,
-        # which could be easily referenced in the following loop
 
         self.manifests = {str(n + 1): []
                           for n in xrange(self.job_spec['total_tiers'])}
@@ -292,10 +287,15 @@ class ZMapReduce(object):
 
     def mapreduce_manifest(self, job_num, objects):
 
+        objects = [o for o in objects if o]
+
         def _mapper_manifest(job_num, object_ref):
             if not object_ref:
                 return
-            object_num = objects.index(object_ref)
+            if object_ref.endswith('*'):
+                object_num = "glob-%s" % len(objects)
+            else:
+                object_num = objects.index(object_ref)
             if object_ref.startswith(SW):
                 object_ref = object_ref[len(SW):]
             mapper_node = {"name": ("mapper-%s-%s"
@@ -318,10 +318,20 @@ class ZMapReduce(object):
             mapper_node['connect'] = mapper_connect
             return mapper_node
 
-        mapper_manifest = (
-            lambda obr: _mapper_manifest(job_num, obr))
-        nodes = map(mapper_manifest, objects)
-        nodes = [n for n in nodes if n]
+
+        cont_name = objects[0].split('/')[0]
+        # dont worry, its @cached
+        cont_objects = {"%s/%s" % (cont_name, o)
+                        for o in self.list_objects(cont_name,
+                                                   select='name')}
+        diff = set(objects) - cont_objects
+        if not any(diff):
+            # we are simply looking at every object in an input container
+            # use * globbing
+            # this helps avoid the 64kb payload limit for > ~120 objects :)
+            nodes = [_mapper_manifest(job_num, '%s/*' % cont_name)]
+        else:
+            nodes = [_mapper_manifest(job_num, n) for n in objects]
 
         reducer_node = self.reducer_manifest(job_num)
         nodes.append(reducer_node)
@@ -456,9 +466,8 @@ def _execute(job, retries=5, **clientkwargs):
         if retries > 0:
             print "Retrying on exception | %s" % str(err)
             return _execute(job, retries=retries, **clientkwargs)
-        else:
-            print "Max retries met. Fail."
-            return err
+        print "Max retries met. Fail."
+        raise
 
 
 def execute(*manifests, **clientkwargs):
