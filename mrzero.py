@@ -50,6 +50,7 @@ RESULTS = "%s{jobtainer}/results/results-{job_num}.json" % SW
 ERRORS = "%s{jobtainer}/errors/{object_ref}.err" % SW
 MAPPER = "%s{jobtainer}/mapper.py" % SW
 REDUCER = "%s{jobtainer}/reducer.py" % SW
+NULLMAPPER = "%s{jobtainer}/nullmapper.py" % SW
 
 
 def cached(original_func):
@@ -144,6 +145,9 @@ class ZMapReduce(object):
                 raise ValueError("Jobtainer should have a mapper.py and a "
                                  "reducer.py")
 
+        nmupload = concurrent.futures.ThreadPoolExecutor(1).submit(
+            self.upload_nullmapper)
+
         if not inputs:
             input_containers = self.list_containers(select='name')
             input_containers.remove(self.jobtainer)
@@ -161,6 +165,9 @@ class ZMapReduce(object):
             raise ValueError("No input containers matched %s" % inputs)
         self.input_containers = input_containers
         self.all_the_objects = self.list_all_objects_for_job()
+
+        # make sure the nullmapper upload finished
+        assert nmupload.result(timeout=.1)
 
     @property
     def job_spec(self):
@@ -254,6 +261,15 @@ class ZMapReduce(object):
 
         return self.final_result['value']
 
+    def upload_nullmapper(self):
+        """Upload nullmapper.py."""
+        target = NULLMAPPER.format(jobtainer=self.jobtainer)
+        fname = os.path.split(target)[-1]
+        assert os.path.join(self.jobtainer, fname) in target
+        with open(fname, 'r') as script:
+            return self.client.put_object(self.jobtainer, fname,
+                                          script.read())
+
     def cleanup(self, timeout=45):
         """Cleanup errors/results for job.
 
@@ -289,6 +305,13 @@ class ZMapReduce(object):
 
         objects = [o for o in objects if o]
 
+        # tier is in job_num
+        # use nullmapper after first tier
+        if job_num.startswith('1'):
+            mapper = MAPPER
+        else:
+            mapper = NULLMAPPER
+
         def _mapper_manifest(job_num, object_ref):
             if not object_ref:
                 return
@@ -304,7 +327,7 @@ class ZMapReduce(object):
             mapper_connect = ["reducer"]
             mapper_devices = [
                 {"name": "stdin",
-                 "path": "%s" % MAPPER.format(jobtainer=self.jobtainer)},
+                 "path": "%s" % mapper.format(jobtainer=self.jobtainer)},
                 {"name": "input",
                  "path": "%s%s" % (SW, object_ref)},
                 {"name": "stderr",
