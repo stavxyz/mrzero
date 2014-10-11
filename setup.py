@@ -4,8 +4,10 @@ except ImportError:
     from distutils.core import setup
 
 REQUIRES = [
+    'turbolift>=2.1.3',
     'python-swiftclient>=2.2.0',
     'futures>=2.1.6',
+    'sortedcontainers>=0.9.1',
 ]
 
 setup(
