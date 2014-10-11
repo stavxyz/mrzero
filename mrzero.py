@@ -20,6 +20,7 @@ Goals:
 
 """
 import copy
+import functools
 import itertools
 import logging
 import math
@@ -35,14 +36,24 @@ import urlparse
 
 import concurrent.futures
 import requests
+import sortedcontainers
 import swiftclient
 
 LOG = logging.getLogger(__name__)
 CPU_COUNT = concurrent.futures.process.multiprocessing.cpu_count()
 
 CACHE = {}
-PER_JOB = 90
-CONCURRENT_JOBS = 10
+# number of objects per job should probably be either:
+#   - less than 120 (hits http payload limit around here)
+#   OR
+#   - greater than or equal to the number of objects in your
+#     input containers. the module will determine if this
+#     is the case and use * globbing to select all of the
+#     objects in the container.
+
+PER_JOB = 100
+# zebra runs 20 nodes
+CONCURRENT_JOBS = 15
 
 # paths
 SW = "swift://./"
@@ -55,7 +66,8 @@ NULLMAPPER = "%s{jobtainer}/nullmapper.py" % SW
 
 def cached(original_func):
     """Memoize plz."""
-    ih = lambda o: getattr(o, '__hash__', None)
+    ih = lambda o: callable(getattr(o, '__hash__', None))
+    @functools.wraps(original_func)
     def new_func(*args, **kw):
         blob = (original_func.__class__.__name__, original_func.__name__)
         blob += tuple((k for k in sorted(args) if ih(k)))
@@ -106,6 +118,7 @@ def upload_jobtainer(directory, client, dryrun=False):
             with open(filepath, 'r') as script:
                 client.put_object(jobtainer_name, fname, script.read())
 
+
 class ZMapReduce(object):
 
     def __init__(self, jobtainer, inputs=None, per_job=PER_JOB,
@@ -113,7 +126,7 @@ class ZMapReduce(object):
 
         # properties
         self._job_spec = None
-        self.manifests = None
+        self.manifests = sortedcontainers.SortedDict()
         self.final_result = None
         self.results = None
         self.per_job = per_job
@@ -201,7 +214,8 @@ class ZMapReduce(object):
         self.cleanup()
 
         results = []
-        for tier, manis in sorted(self.manifests.items()):
+        assert isinstance(self.manifests, sortedcontainers.SortedDict)
+        for tier, manis in self.manifests.items():
             objs = sum([len(k) - 1 for k in manis])  # minus reducer node
             print ("Running %s zerovm jobs concurrently across %s "
                    "objects (%s/job) for job tier %s"
@@ -214,11 +228,13 @@ class ZMapReduce(object):
 
     def generate_manifests(self):
 
-        self.manifests = {str(n + 1): []
-                          for n in xrange(self.job_spec['total_tiers'])}
+        self.manifests.update(
+                {str(n + 1): []
+                 for n in xrange(self.job_spec['total_tiers'])})
 
         rresults = self.all_the_objects
         i = 0
+        assert isinstance(self.manifests, sortedcontainers.SortedDict)
         for tier, execution_group in self.manifests.items():
             breakup = itertools.izip_longest(
                 *(iter(rresults),) * self.per_job)
@@ -341,13 +357,14 @@ class ZMapReduce(object):
             mapper_node['connect'] = mapper_connect
             return mapper_node
 
+        cont_name = [p for p in
+                     urlparse.urlparse(objects[0]).path.split('/') if p][0]
 
-        cont_name = objects[0].split('/')[0]
         # dont worry, its @cached
         cont_objects = {"%s/%s" % (cont_name, o)
-                        for o in self.list_objects(cont_name,
-                                                   select='name')}
-        diff = set(objects) - cont_objects
+                        for o in self.list_objects(cont_name, select='name')}
+
+        diff = cont_objects - set(objects)
         if not any(diff):
             # we are simply looking at every object in an input container
             # use * globbing
