@@ -8,6 +8,7 @@ REQUIRES = [
     'python-swiftclient>=2.2.0',
     'futures>=2.1.6',
     'sortedcontainers>=0.9.1',
+    'wrapt>=1.9.0',
 ]
 
 setup(

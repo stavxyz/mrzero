@@ -20,7 +20,6 @@ Goals:
 
 """
 import copy
-import functools
 import itertools
 import logging
 import math
@@ -38,6 +37,7 @@ import concurrent.futures
 import requests
 import sortedcontainers
 import swiftclient
+import wrapt
 
 LOG = logging.getLogger(__name__)
 CPU_COUNT = concurrent.futures.process.multiprocessing.cpu_count()
@@ -64,20 +64,22 @@ REDUCER = "%s{jobtainer}/reducer.py" % SW
 NULLMAPPER = "%s{jobtainer}/nullmapper.py" % SW
 
 
-def cached(original_func):
+@wrapt.decorator
+def cached(original_func, instance, args, kw):
     """Memoize plz."""
     ih = lambda o: callable(getattr(o, '__hash__', None))
-    @functools.wraps(original_func)
-    def new_func(*args, **kw):
-        blob = (original_func.__class__.__name__, original_func.__name__)
-        blob += tuple((k for k in sorted(args) if ih(k)))
-        blob += tuple(((k, v) for k, v in sorted(kw.items()) if ih(v)))
-        seek = hash(blob)
-        if seek not in CACHE:
-            CACHE[seek] = original_func(*args, **kw)
-        return copy.deepcopy(CACHE[seek])
-    new_func.__doc__ = original_func.__doc__
-    return new_func
+#    def new_func(*args, **kw):
+    blob = (original_func.__class__.__name__, original_func.__name__)
+    blob += tuple((k for k in sorted(args) if ih(k)))
+    blob += tuple(((k, v) for k, v in sorted(kw.items()) if ih(v)))
+    seek = hash(blob)
+    if seek not in CACHE:
+        CACHE[seek] = original_func(*args, **kw)
+        LOG.debug("Caching return value from %s", original_func.__name__)
+    else:
+        LOG.debug("Returning %s from cache.", original_func.__name__)
+    return copy.deepcopy(CACHE[seek])
+#    return new_func
 
 def normalized_path(path, must_exist=True):
     """Normalize and expand a shorthand or relative path.
@@ -108,8 +110,9 @@ def upload_jobtainer(directory, client, dryrun=False):
             raise IOError(msg)
         else:
             if dryrun:
-                LOG.debug("Dry-run. Would otherwise upload %s.",
-                          filepath)
+                LOG.debug("Dry-run. Would otherwise upload '%s' to "
+                          "container '%s' with object name '%s'",
+                          os.path.relpath(filepath), jobtainer_name, fname)
                 continue
             try:
                 client.get_container(jobtainer_name)
