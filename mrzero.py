@@ -203,11 +203,11 @@ class ZMapReduce(object):
 
     def list_all_objects_for_job(self):
 
-        all_the_objects = []
-        for c in self.input_containers:
-            each = ("%s/%s" % (c, n)
-                    for n in self.list_objects(c, select='name'))
-            map(lambda x: all_the_objects.append(x), each)
+        list_objects = lambda c: ["%s/%s" % (c, n) for n in
+                                  self.list_objects(c, select='name')]
+        with concurrent.futures.ThreadPoolExecutor(CPU_COUNT*16) as pool:
+            result = pool.map(list_objects, self.input_containers)
+            all_the_objects = list(itertools.chain.from_iterable(result))
         return all_the_objects
 
     def __call__(self):
