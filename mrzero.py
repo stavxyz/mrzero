@@ -31,14 +31,14 @@ except ImportError:
 import os
 import urlparse
 
-import concurrent.futures
+from concurrent import futures
 import requests
 import sortedcontainers
 import swiftclient
 import wrapt
 
 LOG = logging.getLogger(__name__)
-CPU_COUNT = concurrent.futures.process.multiprocessing.cpu_count()
+CPU_COUNT = futures.process.multiprocessing.cpu_count()
 
 CACHE = {}
 # number of objects per job should probably be either:
@@ -161,7 +161,7 @@ class ZMapReduce(object):
                 raise ValueError("Jobtainer should have a mapper.py and a "
                                  "reducer.py")
 
-        nmupload = concurrent.futures.ThreadPoolExecutor(1).submit(
+        nmupload = futures.ThreadPoolExecutor(1).submit(
             self.upload_nullmapper)
 
         if not inputs:
@@ -206,7 +206,7 @@ class ZMapReduce(object):
 
         list_objects = lambda c: ["%s/%s" % (c, n) for n in
                                   self.list_objects(c, select='name')]
-        with concurrent.futures.ThreadPoolExecutor(CPU_COUNT*16) as pool:
+        with futures.ThreadPoolExecutor(CPU_COUNT*16) as pool:
             result = pool.map(list_objects, self.input_containers)
             all_the_objects = list(itertools.chain.from_iterable(result))
         return all_the_objects
@@ -302,16 +302,16 @@ class ZMapReduce(object):
             ew = lambda substr: name.endswith(substr)
             return any((sw('errors'), sw('results'), ew('.err'), ew('.pyc')))
 
-        with concurrent.futures.ThreadPoolExecutor(CPU_COUNT*128) as cleanup_pool:
-            futures = []
+        with futures.ThreadPoolExecutor(CPU_COUNT*128) as cleanup_pool:
+            jobs = []
             for r in self.list_objects(self.jobtainer, select='name'):
                 if should_cleanup(r):
-                    futures.append(
+                    jobs.append(
                         cleanup_pool.submit(self.client.delete_object,
                                             self.jobtainer, r))
                     time.sleep(1)
-            if futures:
-                score = concurrent.futures.wait(futures, timeout=timeout)
+            if jobs:
+                score = futures.wait(jobs, timeout=timeout)
                 if score.done and not score.not_done:
                     print ("\nFinished cleaning up [%s object(s)] "
                            "from previous run." % len(score.done))
@@ -523,7 +523,7 @@ def execute(*manifests, **clientkwargs):
     Return http (requests) response object(s).
     """
     partial = lambda job: _execute(job, **clientkwargs)
-    with concurrent.futures.ThreadPoolExecutor(CONCURRENT_JOBS) as tpool:
+    with futures.ThreadPoolExecutor(CONCURRENT_JOBS) as tpool:
         results = []
         for result in tpool.map(partial, manifests, timeout=60*len(manifests)):
             # print "Finished a job: %s" % result
