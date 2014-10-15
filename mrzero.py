@@ -29,8 +29,6 @@ try:
 except ImportError:
     import json
 import os
-import sys
-import threading
 import urlparse
 
 import concurrent.futures
