@@ -1,5 +1,5 @@
-#import eventlet
-#eventlet.monkey_patch()
+# import eventlet
+# eventlet.monkey_patch()
 """
 Goals:
 
@@ -523,7 +523,7 @@ def execute(*manifests, **clientkwargs):
     with concurrent.futures.ThreadPoolExecutor(CONCURRENT_JOBS) as tpool:
         results = []
         for result in tpool.map(partial, manifests, timeout=60*len(manifests)):
-            #print "Finished a job: %s" % result
+            # print "Finished a job: %s" % result
             results.append(result)
             time.sleep(1)
     return results
