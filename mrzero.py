@@ -468,7 +468,8 @@ def setup_client(client):
     """
     client.url, client.token = client.get_auth()
 
-    # prevent Connection pool is full, discarding connection: zebra.zerovm.org !
+    # prevent Connection pool is full, discarding connection:
+    # zebra.zerovm.org !
     parsed_url, http_conn = client.http_connection()
     adapter = requests.adapters.HTTPAdapter(pool_maxsize=1000,
                                             pool_block=False)
