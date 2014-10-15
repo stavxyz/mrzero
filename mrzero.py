@@ -307,7 +307,7 @@ class ZMapReduce(object):
                     futures.append(
                         cleanup_pool.submit(self.client.delete_object,
                                             self.jobtainer, r))
-                    time.sleep()
+                    time.sleep(1)
             if futures:
                 score = concurrent.futures.wait(futures, timeout=timeout)
                 if score.done and not score.not_done:
@@ -524,7 +524,7 @@ def execute(*manifests, **clientkwargs):
         for result in tpool.map(partial, manifests, timeout=60*len(manifests)):
             #print "Finished a job: %s" % result
             results.append(result)
-            time.sleep()
+            time.sleep(1)
     return results
 
 @cached
