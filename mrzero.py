@@ -232,8 +232,8 @@ class ZMapReduce(object):
     def generate_manifests(self):
 
         self.manifests.update(
-                {str(n + 1): []
-                 for n in xrange(self.job_spec['total_tiers'])})
+            {str(n + 1): []
+             for n in xrange(self.job_spec['total_tiers'])})
 
         rresults = self.all_the_objects
         i = 0
