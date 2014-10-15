@@ -171,7 +171,8 @@ class ZMapReduce(object):
             input_containers = []
             if isinstance(inputs, list):
                 for substr in inputs:
-                    input_containers += self.get_input_containers(prefix=substr)
+                    containers = self.get_input_containers(prefix=substr)
+                    input_containers += containers
             elif isinstance(inputs, basestring):
                 input_containers += self.get_input_containers(prefix=inputs)
             else:
@@ -274,7 +275,8 @@ class ZMapReduce(object):
                 self.final_result['container'],
                 self.final_result['ref'])
             try:
-                self.final_result['value'] = json.loads(self.final_result['value'])
+                value = self.final_result['value']
+                self.final_result['value'] = json.loads(value)
             except ValueError:
                 pass
 
@@ -340,6 +342,7 @@ class ZMapReduce(object):
                 object_num = objects.index(object_ref)
             if object_ref.startswith(SW):
                 object_ref = object_ref[len(SW):]
+            stderr_object_ref = os.path.split(object_ref)[-1]
             mapper_node = {"name": ("mapper-%s-%s"
                                     % (job_num, object_num)),
                            "exec": {"path": "file://python:python"}}
@@ -350,9 +353,8 @@ class ZMapReduce(object):
                 {"name": "input",
                  "path": "%s%s" % (SW, object_ref)},
                 {"name": "stderr",
-                 "path": ("%s" % ERRORS.format(
-                                jobtainer=self.jobtainer,
-                                object_ref=os.path.split(object_ref)[-1])),
+                 "path": ("%s" % ERRORS.format(jobtainer=self.jobtainer,
+                                               object_ref=stderr_object_ref)),
                  "content_type": "text/plain"},
                 {"name": "python"}
             ]
