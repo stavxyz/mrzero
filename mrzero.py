@@ -79,6 +79,7 @@ def cached(original_func, instance, args, kw):
     return copy.deepcopy(CACHE[seek])
 #    return new_func
 
+
 def normalized_path(path, must_exist=True):
     """Normalize and expand a shorthand or relative path.
 
@@ -92,6 +93,7 @@ def normalized_path(path, must_exist=True):
         if not os.path.exists(norm):
             raise ValueError("%s is not a valid path." % norm)
     return norm
+
 
 def upload_jobtainer(directory, client, dryrun=False):
     """Upload scripts in specified dir to jobtainer of the same name.
@@ -456,6 +458,7 @@ def get_client(auth=None, user=None, key=None, **kwargs):
     client = swiftclient.Connection(auth, user, key, **kwargs)
     return setup_client(client)
 
+
 def setup_client(client):
     """Set a bigger connection pool and other attributes.
 
@@ -524,6 +527,7 @@ def execute(*manifests, **clientkwargs):
             results.append(result)
             time.sleep(1)
     return results
+
 
 @cached
 def calculate_job_spec(total_objects, per_job):
