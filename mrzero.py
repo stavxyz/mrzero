@@ -1,5 +1,5 @@
-#import eventlet
-#eventlet.monkey_patch()
+# import eventlet
+# eventlet.monkey_patch()
 """
 Goals:
 
@@ -29,18 +29,16 @@ try:
 except ImportError:
     import json
 import os
-import sys
-import threading
 import urlparse
 
-import concurrent.futures
+from concurrent import futures
 import requests
 import sortedcontainers
 import swiftclient
 import wrapt
 
 LOG = logging.getLogger(__name__)
-CPU_COUNT = concurrent.futures.process.multiprocessing.cpu_count()
+CPU_COUNT = futures.process.multiprocessing.cpu_count()
 
 CACHE = {}
 # number of objects per job should probably be either:
@@ -81,6 +79,7 @@ def cached(original_func, instance, args, kw):
     return copy.deepcopy(CACHE[seek])
 #    return new_func
 
+
 def normalized_path(path, must_exist=True):
     """Normalize and expand a shorthand or relative path.
 
@@ -94,6 +93,7 @@ def normalized_path(path, must_exist=True):
         if not os.path.exists(norm):
             raise ValueError("%s is not a valid path." % norm)
     return norm
+
 
 def upload_jobtainer(directory, client, dryrun=False):
     """Upload scripts in specified dir to jobtainer of the same name.
@@ -161,7 +161,7 @@ class ZMapReduce(object):
                 raise ValueError("Jobtainer should have a mapper.py and a "
                                  "reducer.py")
 
-        nmupload = concurrent.futures.ThreadPoolExecutor(1).submit(
+        nmupload = futures.ThreadPoolExecutor(1).submit(
             self.upload_nullmapper)
 
         if not inputs:
@@ -171,7 +171,8 @@ class ZMapReduce(object):
             input_containers = []
             if isinstance(inputs, list):
                 for substr in inputs:
-                    input_containers += self.get_input_containers(prefix=substr)
+                    containers = self.get_input_containers(prefix=substr)
+                    input_containers += containers
             elif isinstance(inputs, basestring):
                 input_containers += self.get_input_containers(prefix=inputs)
             else:
@@ -205,7 +206,7 @@ class ZMapReduce(object):
 
         list_objects = lambda c: ["%s/%s" % (c, n) for n in
                                   self.list_objects(c, select='name')]
-        with concurrent.futures.ThreadPoolExecutor(CPU_COUNT*16) as pool:
+        with futures.ThreadPoolExecutor(CPU_COUNT*16) as pool:
             result = pool.map(list_objects, self.input_containers)
             all_the_objects = list(itertools.chain.from_iterable(result))
         return all_the_objects
@@ -232,8 +233,8 @@ class ZMapReduce(object):
     def generate_manifests(self):
 
         self.manifests.update(
-                {str(n + 1): []
-                 for n in xrange(self.job_spec['total_tiers'])})
+            {str(n + 1): []
+             for n in xrange(self.job_spec['total_tiers'])})
 
         rresults = self.all_the_objects
         i = 0
@@ -274,7 +275,8 @@ class ZMapReduce(object):
                 self.final_result['container'],
                 self.final_result['ref'])
             try:
-                self.final_result['value'] = json.loads(self.final_result['value'])
+                value = self.final_result['value']
+                self.final_result['value'] = json.loads(value)
             except ValueError:
                 pass
 
@@ -300,16 +302,16 @@ class ZMapReduce(object):
             ew = lambda substr: name.endswith(substr)
             return any((sw('errors'), sw('results'), ew('.err'), ew('.pyc')))
 
-        with concurrent.futures.ThreadPoolExecutor(CPU_COUNT*128) as cleanup_pool:
-            futures = []
+        with futures.ThreadPoolExecutor(CPU_COUNT*128) as cleanup_pool:
+            jobs = []
             for r in self.list_objects(self.jobtainer, select='name'):
                 if should_cleanup(r):
-                    futures.append(
+                    jobs.append(
                         cleanup_pool.submit(self.client.delete_object,
                                             self.jobtainer, r))
                     time.sleep(1)
-            if futures:
-                score = concurrent.futures.wait(futures, timeout=timeout)
+            if jobs:
+                score = futures.wait(jobs, timeout=timeout)
                 if score.done and not score.not_done:
                     print ("\nFinished cleaning up [%s object(s)] "
                            "from previous run." % len(score.done))
@@ -340,6 +342,7 @@ class ZMapReduce(object):
                 object_num = objects.index(object_ref)
             if object_ref.startswith(SW):
                 object_ref = object_ref[len(SW):]
+            stderr_object_ref = os.path.split(object_ref)[-1]
             mapper_node = {"name": ("mapper-%s-%s"
                                     % (job_num, object_num)),
                            "exec": {"path": "file://python:python"}}
@@ -350,9 +353,8 @@ class ZMapReduce(object):
                 {"name": "input",
                  "path": "%s%s" % (SW, object_ref)},
                 {"name": "stderr",
-                 "path": ("%s" % ERRORS.format(
-                                jobtainer=self.jobtainer,
-                                object_ref=os.path.split(object_ref)[-1])),
+                 "path": ("%s" % ERRORS.format(jobtainer=self.jobtainer,
+                                               object_ref=stderr_object_ref)),
                  "content_type": "text/plain"},
                 {"name": "python"}
             ]
@@ -458,6 +460,7 @@ def get_client(auth=None, user=None, key=None, **kwargs):
     client = swiftclient.Connection(auth, user, key, **kwargs)
     return setup_client(client)
 
+
 def setup_client(client):
     """Set a bigger connection pool and other attributes.
 
@@ -465,7 +468,8 @@ def setup_client(client):
     """
     client.url, client.token = client.get_auth()
 
-    # prevent Connection pool is full, discarding connection: zebra.zerovm.org !
+    # prevent Connection pool is full, discarding connection:
+    # zebra.zerovm.org !
     parsed_url, http_conn = client.http_connection()
     adapter = requests.adapters.HTTPAdapter(pool_maxsize=1000,
                                             pool_block=False)
@@ -519,13 +523,14 @@ def execute(*manifests, **clientkwargs):
     Return http (requests) response object(s).
     """
     partial = lambda job: _execute(job, **clientkwargs)
-    with concurrent.futures.ThreadPoolExecutor(CONCURRENT_JOBS) as tpool:
+    with futures.ThreadPoolExecutor(CONCURRENT_JOBS) as tpool:
         results = []
         for result in tpool.map(partial, manifests, timeout=60*len(manifests)):
-            #print "Finished a job: %s" % result
+            # print "Finished a job: %s" % result
             results.append(result)
             time.sleep(1)
     return results
+
 
 @cached
 def calculate_job_spec(total_objects, per_job):
